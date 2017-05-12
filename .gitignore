@@ -1,0 +1,5 @@
+*.suo
+*.d
+Debug
+Release
+__vm

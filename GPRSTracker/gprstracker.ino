@@ -21,38 +21,29 @@ void setup()
 
 	//Let's get started!
 	Serial.println("Begin");
-	gpsSerial.listen();
-	cellSerial.listen();
-	//gprs.beginRequest("54.225.181.159", "httpbin.org", "/get?value=Alaborda");
-	gprs.makeRequest("54.225.181.159", "httpbin.org", "/get?value=Alaborda");
+	gprs.beginRequest("httpbin.org", "/get?value=Alaborda");
 }
 
 
 void loop() {
-	/*while (gpsSerial.available() > 0)
+	/*gpsSerial.listen();
+	if(gpsSerial.available() > 0)
 	{
 		if (gps.encode(gpsSerial.read()) 
 			&& gps.location.isValid()
 			&& gps.date.isValid())
 			{
 				displayGPSInfo();
-				gprs.beginRequest(
-					"54.225.181.159",
-					"httpbin.org", 
-					("/get?value=" + getGPSInfo()));
-				cellSerial.listen();
 			}
-	}
-
-
+	}*/
 
 	//If a character comes in from the cellular module...
-	while (cellSerial.available() > 0)
+	cellSerial.listen();
+	if (cellSerial.available() > 0)
 	{
 		char incomingChar = cellSerial.read(); //Get the character from the cellular serial port.
-		Serial.print(incomingChar); //Print the incoming character to the terminal.
 		gprs.loop(incomingChar);
-	}*/
+	}
 }
 
 String getGPSInfo()

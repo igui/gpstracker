@@ -12,13 +12,17 @@
 #include <SoftwareSerial.h>
 
 class GPRS {
-private:
+public:
 	enum State {
+		// Initialization
 		WAIT_FOR_AT_MODULE,
 		QUERY_GPRS,
 		SETUP_PDP_CONTEXT,
 		SET_PDP_CONTEXT_USER_PASS,
 		ACTIVATE_PDP_CONTEXT,
+
+		// DNS Resolution 
+		CONFIGURE_DNS_HOST_CONNECTION,
 		START_DNS_CONNECTION,
 		QUERY_DNS_CONN_STATUS_START,
 		QUERY_DNS_CONN_STATUS_WAIT_FOR_CONN_STATUS,
@@ -26,7 +30,9 @@ private:
 		SEND_DNS_PACKET_DATA_SET_LENGTH,
 		SEND_DNS_PACKET_DATA_WRITE,
 		SEND_DNS_PACKET_DATA_RECEIVED,
-		WAIT_DNS_FOR_CONN_CLOSE,
+		WAIT_DNS_CONN_CLOSE,
+
+		// Packet transmition
 		CONFIGURE_REMOTE_HOST,
 		START_TCP_CONNECTION,
 		QUERY_CONN_STATUS_START,
@@ -36,11 +42,26 @@ private:
 		SEND_PACKET_DATA_WRITE,
 		SEND_PACKET_DATA_RECEIVED,
 		WAIT_FOR_CONN_CLOSE,
+
+		// Others
 		DONE,
-		
-		MAKING_REQUEST,
 	};
 
+	enum Error {
+		NO_ERROR = 0,
+		QUERY_CONN_STATUS_ERROR,
+		QUERY_CONN_STATUS_INVALID_NUMBER,
+		REQUEST_NOT_CONFIGURED,
+		APN_NOT_CONFIGURED
+	};
+
+private:
+	enum ReadMessageStatus {
+		MUST_READ,
+		IGNORE_UNTIL_LINE_END
+	};
+
+	// GPRS Serial to write commands into
 	SoftwareSerial &cellSerial;
 
 	// APN info
@@ -50,30 +71,48 @@ private:
 	const char *dns;
 
 	// Request
-	const char *ip;
+	unsigned char ip[4];
 	const char *host;
-	String path;
+	const char *path;
 
-	// GPRS Status
+	// Operation Status
 	State state;
+	Error lastError;
+	
+	// Read message Status
 	String currentMessage;
 	String lastMessage;
+	ReadMessageStatus messageStatus;
+
 	int connectionStatus;
 
 public:
 	GPRS(SoftwareSerial &cellSerial, const char *apn, const char *apn_user, const char *apn_password, const char *dns);
-	void beginRequest(const char *ip, const char *host, const String &path);
-	void makeRequest(const char *ip, const char *host, const String &path);
+	void beginRequest(const char *host, const char *path);
 	void loop(char incomingChar);
 private:
-	bool checkParameters();
+	void checkParameters();
 	void processIncomingChar(char incomingChar);
-	void simpleStep(const char *expectedMessage, const char *sucessUserMessage, const char *nextCommand, State nextState);
-	void simpleStep(const char *expectedMessage, const char *sucessUserMessage, const String &nextCommand, State nextState);
-	void queryConnStatusWaitForConnection();
-	void queryConnStatusWaitForOK();
-	void sendPacketDataSendData();
+
+	// Variants of simple step with different number of characters
+	void simpleStep(
+		char incomingChar,
+		const char *expectedMessage,
+		State nextState, 
+		const char *nextMessage = NULL,
+		const char *nextMessage2 = NULL,
+		const char *nextMessage3 = NULL,
+		const char *nextMessage4 = NULL,
+		const char *nextMessage5 = NULL);
+	
+	void queryConnStatusWaitForConnection(char incomingChar, State nextState);
+	void queryConnStatusWaitForOK(char incomingChar, const char *connectionId, int dataLength, State noConnState, State openConnState);
+	void sendPacketDataSendData(char incomingChar);
+	void sendDNSRequest(char incomingChar);
+	int  getDNSRequestPacketLength();
 	int  getRawRequestDataLength();
+
+	static void printCharSerial(char c);
 };
 #endif
 

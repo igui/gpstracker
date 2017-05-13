@@ -3,12 +3,22 @@
 // 
 
 #include "GPRS.h"
+#include <avr/pgmspace.h>
 
 // GPRS constants
-const int CONNECTION_STATUS_LOOP_INTERVAL = 1000;
 const char *HTTP_USER_AGENT = "Igui's GPRS_CLIENT 0.0.1";
+const char *DNS_PORT = "53";
 
-#define T_A 1 //Ipv4 address
+const char DNS_HEADER[] = {
+	0x00, 0x02, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00
+};
+
+const char DNS_SUFFIX[] = { 0x00, 0x00,
+	0x01, 0x00, 0x01
+};
+
+const int MAX_MESSAGE_LENGTH = 32;
 
 GPRS::GPRS(SoftwareSerial &cellSerial, const char *apn, const char *apn_user, const char *apn_password, const char *dns):
 	cellSerial(cellSerial),
@@ -17,51 +27,18 @@ GPRS::GPRS(SoftwareSerial &cellSerial, const char *apn, const char *apn_user, co
 	apn_password(apn_password),
 	dns(dns),
 	state(DONE),
+	lastError(NO_ERROR),
 	connectionStatus(0)
 {
-
 }
 
-void GPRS::beginRequest(const char *ip, const char *host, const String &path)
+void GPRS::beginRequest(const char *host, const char *path)
 {
-	this->ip = ip;
+	lastError = NO_ERROR;
+	ip[0] = ip[1] = ip[2] = ip[3] = 0;
 	this->host = host;
 	this->path = path;
-	if (checkParameters())
-	{
-		state = WAIT_FOR_AT_MODULE;
-	}
-	else
-	{
-		state = DONE;
-	}
-}
-
-
-
-void GPRS::makeRequest(const char * ip, const char * host, const String & path)
-{
-	this->ip = ip;
-	this->host = host;
-	this->path = path;
-	if (checkParameters())
-	{
-		state = MAKING_REQUEST;
-	}
-	else
-	{
-		state = DONE;
-		return;
-	}
-
-	while (true)
-	{
-		while (cellSerial.available() > 0)
-		{
-			char incomingChar = cellSerial.read();
-			Serial.print(incomingChar); //Print the incoming character to the terminal.
-		}
-	}
+	checkParameters();
 }
 
 void GPRS::processIncomingChar(char incoming_char)
@@ -84,71 +61,104 @@ void GPRS::processIncomingChar(char incoming_char)
 }
 
 
-bool GPRS::checkParameters()
+void GPRS::checkParameters()
 {
 	if (!apn || !apn_user || !apn_password || !dns)
 	{
-		Serial.print("<<checkParameters: ERROR: GPS request was not set >>\n");
-		return false;
+		lastError = APN_NOT_CONFIGURED;
+		state = DONE;
 	}
-	else if (!ip || !host || !path)
+	else if (!host || !path)
 	{
-		Serial.print("<<checkParameters: ERROR: Request IP NOT SET >>\n");
-		return false;
+		lastError = REQUEST_NOT_CONFIGURED;
+		state = DONE;
 	}
-	return true;
+	else
+	{
+		state = WAIT_FOR_AT_MODULE;
+	}
 }
 
-void GPRS::simpleStep(const char *expectedCellMessage, const char *sucessUserMessage, const char *nextCommand, State nextState)
+
+void GPRS::simpleStep(
+	char incomingChar,
+	const char *expectedCellMessage,
+	State nextState,
+	const char *nextCommand1,
+	const char *nextCommand2,
+	const char *nextCommand3,
+	const char *nextCommand4,
+	const char *nextCommand5)
 {
+	processIncomingChar(incomingChar);
+
 	if (lastMessage == expectedCellMessage)
 	{
-		Serial.print("<<");
-		Serial.print(sucessUserMessage);
-		Serial.print(">>");
-		if (nextCommand)
-		{
-			cellSerial.print(nextCommand);
-			Serial.print(nextCommand);
-		}
 		state = nextState;
+		if (nextCommand1)
+		{
+			cellSerial.print(nextCommand1);
+			Serial.print(nextCommand1);
+		}
+		if (nextCommand2)
+		{
+			cellSerial.print(nextCommand2);
+			Serial.print(nextCommand2);
+		}
+		if (nextCommand3)
+		{
+			cellSerial.print(nextCommand3);
+			Serial.print(nextCommand3);
+		}
+		if (nextCommand4)
+		{
+			cellSerial.print(nextCommand4);
+			Serial.print(nextCommand4);
+		}
+		if (nextCommand5)
+		{
+			cellSerial.print(nextCommand5);
+			Serial.print(nextCommand5);
+		}
 	}
 }
 
-void GPRS::simpleStep(const char *expectedCellMessage, const char *sucessUserMessage, const String &nextCommand, State nextState)
+void GPRS::queryConnStatusWaitForConnection(char incomingChar, GPRS::State nextState)
 {
-	simpleStep(expectedCellMessage, sucessUserMessage, nextCommand.c_str(), nextState);
-}
+	processIncomingChar(incomingChar);
 
-void GPRS::queryConnStatusWaitForConnection()
-{
 	if (!lastMessage.startsWith("+SOCKSTATUS:"))
 	{
 		return;
 	}
 
+	
 	int first_comma = lastMessage.indexOf(',');
 	if (first_comma < 0)
 	{
-		Serial.print("<<queryConnStatusWaitForConnection: ERROR: unexpected message>>\n");
 		state = DONE;
+		lastError = QUERY_CONN_STATUS_ERROR;
 		return;
 	}
 
 	connectionStatus = lastMessage.substring(first_comma + 1).toInt();
-	state = QUERY_CONN_STATUS_WAIT_FOR_OK;
+	state = nextState;
 }
 
 int GPRS::getRawRequestDataLength()
 {
-	return 4 + path.length() + 11 +
+	return 4 + strlen(path) + 11 +
 		6 + strlen(host) + 2 +
 		12 + strlen(HTTP_USER_AGENT) + 4;
 }
 
-void GPRS::queryConnStatusWaitForOK()
+void GPRS::queryConnStatusWaitForOK(char incomingChar, const char *connectionId, int dataLength, State onNoConn, State onYesConn)
 {
-	if (lastMessage != "OK")
+	processIncomingChar(incomingChar);
+
+	const int CONNECTION_STATUS_LOOP_INTERVAL = 1000;
+
+	if (lastMessage != F("OK"))
 	{
 		return;
 	}
@@ -156,185 +166,275 @@ void GPRS::queryConnStatusWaitForOK()
 	switch (connectionStatus)
 	{
 	case(0):
-		Serial.print("<<Not connected yet>>\n");
 		delay(CONNECTION_STATUS_LOOP_INTERVAL);
-		cellSerial.print("AT+SDATASTATUS=1\r");
-		state = QUERY_CONN_STATUS_WAIT_FOR_CONN_STATUS;
+		cellSerial.print(F("AT+SDATASTATUS="));
+		Serial.print(F("AT+SDATASTATUS="));
+		cellSerial.print(connectionId);
+		Serial.print(connectionId);
+		cellSerial.print("\r");
+		state = onNoConn;
 		break;
 	case(1):
-		Serial.print("<<Start sending data>>");
-		cellSerial.print("AT+SDATATSEND=1,");
-		cellSerial.print(String(getRawRequestDataLength()));
-		cellSerial.print("\r");
-		state = SEND_PACKET_DATA_SET_LENGTH;
+		cellSerial.print(F("AT+SDATATSEND="));
+		Serial.print(F("AT+SDATATSEND="));
+		cellSerial.print(connectionId);
+		Serial.print(connectionId);
+		cellSerial.print(F(","));
+		Serial.print(F(","));
+		cellSerial.print(String(dataLength));
+		Serial.print(String(dataLength));
+		cellSerial.print(F("\r"));
+		state = onYesConn;
 		break;
 	default:
-		Serial.print("<<queryConnStatusWaitForConnection: ERROR: unknown connection status>>\n");
 		state = DONE;
+		lastError = QUERY_CONN_STATUS_INVALID_NUMBER;
 		break;
 	}
 }
 
-void GPRS::sendPacketDataSendData()
+void GPRS::sendPacketDataSendData(char incomingChar)
 {
-	if (currentMessage != ">")
+	processIncomingChar(incomingChar);
+
+	if (currentMessage != F(">"))
 	{
 		return;
 	}
 
-	Serial.print("<<Sending data>>\n");
+	Serial.print(F("<<Sending data>>\n"));
 
-	cellSerial.print("GET ");
+	cellSerial.print(F("GET "));
 	cellSerial.print(path);
-	cellSerial.print(" HTTP/1.1\r\n");
-	cellSerial.print("Host: ");
+	cellSerial.print(F(" HTTP/1.1\r\n"));
+	cellSerial.print(F("Host: "));
 	cellSerial.print(host);
-	cellSerial.print("\r\nUser-Agent: ");
+	cellSerial.print(F("\r\nUser-Agent: "));
 	cellSerial.print(HTTP_USER_AGENT);
-	cellSerial.print("\r\n\r\n");
+	cellSerial.print(F("\r\n\r\n"));
 	cellSerial.write(26); // Control+Z
 
-	state = SEND_PACKET_DATA_RECEIVED;
+	state = SEND_PACKET_DATA_WRITE;
 }
 
-void GPRS::loop(char incomingChar) {
-	if (state != DONE)
+void GPRS::printCharSerial(const char c)
+{
+	Serial.print(String(int(c >> 4), HEX));
+	Serial.print(String(int(c & 0xF), HEX));
+}
+
+void GPRS::sendDNSRequest(char incomingChar)
+{
+	processIncomingChar(incomingChar);
+
+	if (currentMessage != F(">"))
 	{
-		processIncomingChar(incomingChar);
+		return;
 	}
+
+	cellSerial.write(DNS_HEADER, sizeof(DNS_HEADER));
+	for (unsigned int i = 0; i < sizeof(DNS_HEADER); ++i)
+	{
+		printCharSerial(DNS_HEADER[i]);
+	}
+
+	auto labelStart = host;
+	while (true)
+	{
+		auto labelEnd = labelStart;
+		while(*labelEnd != '.' && *labelEnd != '\0')
+		{
+			++labelEnd;
+		}
+
+		auto labelLength = labelEnd - labelStart;
+		cellSerial.write(labelLength);
+		printCharSerial(labelLength);
+
+		cellSerial.write(labelStart, labelLength);
+		for (auto c = labelStart; c != labelEnd; ++ c)
+		{
+			printCharSerial(*c);
+		}
+		
+		if (*labelEnd == '\0')
+		{
+			break;
+		}
+		else
+		{
+			labelStart = labelEnd + 1;
+		}
+	}
+
+	
+	cellSerial.write(DNS_SUFFIX, sizeof(DNS_SUFFIX));
+	for (unsigned int i = 0; i < sizeof(DNS_SUFFIX); ++i)
+	{
+		printCharSerial(DNS_SUFFIX[i]);
+	}
+	
+
+	cellSerial.write(26); // Control+Z
+
+	Serial.print(F(" ESC\n"));
+
+	state = SEND_DNS_PACKET_DATA_WRITE;
+}
+
+int GPRS::getDNSRequestPacketLength()
+{
+	// 1 is the octet for the first label
+	return sizeof(DNS_HEADER) + 1 + strlen(host) + sizeof(DNS_SUFFIX);
+}
+
+
+
+void GPRS::loop(char incomingChar) {
+	Serial.print(incomingChar); 
 
 	switch (state)
 	{
 	case(WAIT_FOR_AT_MODULE):
-		simpleStep("+SIND: 4", "Query GPRS_STATUS", "AT+CGATT?\r", QUERY_GPRS);
+		simpleStep(incomingChar, "+SIND: 4", QUERY_GPRS, "AT+CGATT?\r");
 		break;
 	case(QUERY_GPRS):
 		simpleStep(
+			incomingChar,
 			"OK",
-			"Setup PDP Context",
-			"AT+CGDCONT=1,\"IP\",\"" + String(apn) + "\"\r",
-			SETUP_PDP_CONTEXT
-		);
+			SETUP_PDP_CONTEXT,
+			"AT+CGDCONT=1,\"IP\",\"", apn, "\"\r");
 		break;
 	case(SETUP_PDP_CONTEXT):
 		simpleStep(
+			incomingChar,
 			"OK",
-			"Set PDP Context user and password",
-			"AT+CGPCO=0,\"" + String(apn_user) + "\",\"" + String(apn_password) + "\", 1\r",
-			SET_PDP_CONTEXT_USER_PASS
+			SET_PDP_CONTEXT_USER_PASS,
+			"AT+CGPCO=0,\"", apn_user, "\",\"", apn_password, "\", 1\r"
 		);
 		break;
 	case(SET_PDP_CONTEXT_USER_PASS):
-		simpleStep("OK", "Activate PDP Context", "AT+CGACT=1,1\r", CONFIGURE_REMOTE_HOST);
+		simpleStep(
+			incomingChar,
+			"OK",
+			CONFIGURE_DNS_HOST_CONNECTION,
+			"AT+CGACT=1,1\r");
 		break;
+
+	case(CONFIGURE_DNS_HOST_CONNECTION):
+		simpleStep(
+			incomingChar,
+			"OK",
+			START_DNS_CONNECTION,
+			"AT+SDATACONF=2,\"UDP\",\"",  dns, "\",", DNS_PORT, "\r"
+		);
+		break;
+	case(START_DNS_CONNECTION):
+		simpleStep(
+			incomingChar,
+			"OK",
+			QUERY_DNS_CONN_STATUS_START,
+			"AT+SDATASTART=2,1\r"
+		);
+		break;
+	case(QUERY_DNS_CONN_STATUS_START):
+		simpleStep(
+			incomingChar,
+			"OK",
+			QUERY_DNS_CONN_STATUS_WAIT_FOR_CONN_STATUS,
+			"AT+SDATASTATUS=2\r"
+		);
+		break;
+	case(QUERY_DNS_CONN_STATUS_WAIT_FOR_CONN_STATUS):
+		queryConnStatusWaitForConnection(incomingChar, QUERY_DNS_CONN_STATUS_WAIT_FOR_OK);
+		break;
+	case(QUERY_DNS_CONN_STATUS_WAIT_FOR_OK):
+		queryConnStatusWaitForOK(
+			incomingChar,
+			"2",
+			getDNSRequestPacketLength(),
+			QUERY_DNS_CONN_STATUS_WAIT_FOR_CONN_STATUS,
+			SEND_DNS_PACKET_DATA_SET_LENGTH);
+		break;
+	case(SEND_DNS_PACKET_DATA_SET_LENGTH):
+		sendDNSRequest(incomingChar);
+		break;
+
+	case(SEND_DNS_PACKET_DATA_WRITE):
+		simpleStep(
+			incomingChar,
+			"OK",
+			SEND_DNS_PACKET_DATA_RECEIVED
+		);
+		break;
+	case(SEND_DNS_PACKET_DATA_RECEIVED):
+		simpleStep(
+			incomingChar,
+			"+STCPD:2",
+			DONE,
+			"AT+SDATAREAD=2\r"
+		);
+		break;
+
 	case(CONFIGURE_REMOTE_HOST):
 		simpleStep(
+			incomingChar,
 			"OK",
-			"Set Remote Host and Port for TCP Connection ",
-			"AT+SDATACONF=1,\"TCP\",\"" + String(ip) + "\",80\r",
-			START_TCP_CONNECTION
+			START_TCP_CONNECTION,
+			"AT+SDATACONF=1,\"TCP\",\"www.loloman.com\",80\r"
 		);
 		break;
 	case(START_TCP_CONNECTION):
 		simpleStep(
+			incomingChar,
 			"OK",
-			"Start TCP Connection",
-			"AT+SDATASTART=1,1\r",
-			QUERY_CONN_STATUS_START
+			QUERY_CONN_STATUS_START,
+			"AT+SDATASTART=1,1\r"
 		);
 		break;
 	case(QUERY_CONN_STATUS_START):
 		simpleStep(
+			incomingChar,
 			"OK",
-			"Query Connection Status",
-			"AT+SDATASTATUS=1\r",
-			QUERY_CONN_STATUS_WAIT_FOR_CONN_STATUS
+			QUERY_CONN_STATUS_WAIT_FOR_CONN_STATUS,
+			"AT+SDATASTATUS=1\r"
 		);
 		break;
 	case(QUERY_CONN_STATUS_WAIT_FOR_CONN_STATUS):
-		queryConnStatusWaitForConnection();
+		queryConnStatusWaitForConnection(
+			incomingChar,
+			QUERY_CONN_STATUS_WAIT_FOR_OK
+		);
 		break;
 	case(QUERY_CONN_STATUS_WAIT_FOR_OK):
-		queryConnStatusWaitForOK();
+		queryConnStatusWaitForOK(
+			incomingChar,
+			"1",
+			getRawRequestDataLength(),
+			QUERY_CONN_STATUS_WAIT_FOR_CONN_STATUS,
+			SEND_PACKET_DATA_SET_LENGTH);
 		break;
 	case(SEND_PACKET_DATA_SET_LENGTH):
-		sendPacketDataSendData();
+		sendPacketDataSendData(incomingChar);
 		break;
 	case(SEND_PACKET_DATA_WRITE):
 		simpleStep(
+			incomingChar,
 			"OK",
-			"Waiting for data receive confirmation",
-			"",
 			SEND_PACKET_DATA_RECEIVED
 		);
 		break;
 	case(SEND_PACKET_DATA_RECEIVED):
-		// TODO don't query for data status. It is useless
 		simpleStep(
+			incomingChar,
 			"+STCPD:1",
-			"Waiting for data from host",
-			"AT+SDATATREAD=1\r",
-			DONE
+			DONE,
+			"AT+SDATATREAD=1\r"
 		);
 		break;
 	default:
 		break;
 	}
 }
-
-
-struct DNS_HEADER
-{
-	unsigned short id; // identification number
-
-	unsigned char rd : 1; // recursion desired
-	unsigned char tc : 1; // truncated message
-	unsigned char aa : 1; // authoritive answer
-	unsigned char opcode : 4; // purpose of message
-	unsigned char qr : 1; // query/response flag
-
-	unsigned char rcode : 4; // response code
-	unsigned char cd : 1; // checking disabled
-	unsigned char ad : 1; // authenticated data
-	unsigned char z : 1; // its z! reserved
-	unsigned char ra : 1; // recursion available
-
-	unsigned short q_count; // number of question entries
-	unsigned short ans_count; // number of answer entries
-	unsigned short auth_count; // number of authority entries
-	unsigned short add_count; // number of resource entries
-};
-
-//Constant sized fields of query structure
-struct QUESTION
-{
-	unsigned short qtype;
-	unsigned short qclass;
-};
-
-//Constant sized fields of the resource record structure
-#pragma pack(push, 1)
-struct R_DATA
-{
-	unsigned short type;
-	unsigned short _class;
-	unsigned int ttl;
-	unsigned short data_len;
-};
-#pragma pack(pop)
-
-//Pointers to resource record contents
-struct RES_RECORD
-{
-	struct R_DATA *resource;
-	unsigned char rdata[16];
-};
-
-//Structure of a Query
-typedef struct
-{
-	unsigned char *name;
-	struct QUESTION *ques;
-} QUERY;
 
 

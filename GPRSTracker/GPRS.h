@@ -9,6 +9,7 @@
 	#include "WProgram.h"
 #endif
 
+#include "Timer.h"
 #include <SoftwareSerial.h>
 
 const int MAX_MESSAGE_LENGTH = 32;
@@ -60,6 +61,7 @@ public:
 		APN_NOT_CONFIGURED,
 		READ_PAST_RESPONSE_END,
 		DNS_NO_ANSWER,
+		TIMEOUT
 	};
 
 private:
@@ -97,12 +99,16 @@ private:
 	bool readingHighHexChar;
 	char currentHexByte[3];
 	char currentPart[MAX_MESSAGE_LENGTH];
+
+	// Used to calculate timeout
+	Timer timer;
 public:
 	GPRS(SoftwareSerial &cellSerial, const char *apn, const char *apn_user, const char *apn_password, const char *dns);
 	void beginRequest(const char *host, const char *path);
 	State getState();
 	Error getLastError();
 	void loop(char incomingChar);
+	void loopNoInput();
 private:
 	void checkParameters();
 	void processIncomingASCII(char incomingChar);
@@ -113,6 +119,7 @@ private:
 		char incomingChar,
 		const char *expectedMessage,
 		State nextState, 
+		int timeout,
 		const char *nextMessage = NULL,
 		const char *nextMessage2 = NULL,
 		const char *nextMessage3 = NULL,
@@ -131,6 +138,8 @@ private:
 	void readDNSFirstAnswer(char incomingChar);
 	void readUntilEndLine(char incomingChar);
 	void configureRemoteHost(char incomingChar);
+	void error(Error lastError);
+	void success(State newState, unsigned long timeout);
 
 	static void printCharSerial(char c);
 };

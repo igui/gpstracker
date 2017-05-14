@@ -1,3 +1,6 @@
+#include "GPSTracker.h"
+#include "Reset.h"
+#include "Timer.h"
 #include <SoftwareSerial.h> //Include the NewSoftSerial library to send serial commands to the cellular module.
 #include <string.h> //Used for string manipulations
 #include "GPRS.h"
@@ -11,8 +14,13 @@ SoftwareSerial cellSerial(2, 3); //Create a 'fake' serial port. Pin 2 is the Rx 
 GPRS gprs(cellSerial, "antel.lte", "", "", "200.40.220.245");
 // The TinyGPS++ object
 TinyGPSPlus gps;
-
+// The request path to make requests
 String requestPath;
+// Read status
+enum Status {
+	READ_GPS,
+	UPLOAD_GPRS
+} state;
 
 void setup()
 {
@@ -20,28 +28,57 @@ void setup()
 	Serial.begin(9600);
 	cellSerial.begin(9600);
 	gpsSerial.begin(9600);
-
-	//Let's get started!
+	readGPS();
 	Serial.println("Begin");
 }
 
-
 void loop() {
-	gpsSerial.listen();
-	while (true)
+	switch (state)
 	{
-		if (gpsSerial.available() > 0)
+	case(READ_GPS):
+		readGPSLoop();
+		break;
+	case(UPLOAD_GPRS):
+		uploadGPRSLoop();
+		break;
+	default:
+		break;
+	}
+	anyStateLoop();
+}
+
+void anyStateLoop()
+{
+	if (Serial.available())
+	{
+		auto c = Serial.read();
+		cellSerial.write(c);
+		Serial.write(c);
+	}
+}
+
+void readGPS()
+{
+	state = READ_GPS;
+	gpsSerial.listen();
+}
+
+void readGPSLoop()
+{
+	if (gpsSerial.available() > 0)
+	{
+		if (gps.encode(gpsSerial.read())
+			&& gps.location.isValid()
+			&& gps.date.isValid())
 		{
-			if (gps.encode(gpsSerial.read())
-				&& gps.location.isValid()
-				&& gps.date.isValid())
-			{
-				displayGPSInfo();
-				break;
-			}
+			displayGPSInfo();
+			uploadGPRS();
 		}
 	}
+}
 
+void uploadGPRS()
+{
 	requestPath = "/get?value=" +
 		String(gps.location.lat()) +
 		"," +
@@ -50,19 +87,36 @@ void loop() {
 	gprs.beginRequest("httpbin.org", requestPath.c_str());
 
 	cellSerial.listen();
-	while (true)
-	{
-		if (cellSerial.available() > 0)
-		{
-			char incomingChar = cellSerial.read(); //Get the character from the cellular serial port.
-			gprs.loop(incomingChar);
+	state = UPLOAD_GPRS;
+}
 
-			if (gprs.getState() == GPRS::DONE)
-			{
-				Serial.println(F("<<<DONE>>>"));
-				break;
-			}
+void uploadGPRSLoop()
+{
+	if (cellSerial.available() > 0)
+	{
+		char incomingChar = cellSerial.read();
+		gprs.loop(incomingChar);
+	}
+	else
+	{
+		gprs.loopNoInput();
+	}
+
+	if (gprs.getState() == GPRS::DONE)
+	{
+		auto error = gprs.getLastError();
+		if (error == GPRS::NO_ERROR)
+		{
+			Serial.println(F("<<<DONE>>>"));
 		}
+		else
+		{
+			Serial.print(F("<<ERROR: "));
+			Serial.print(error, 10);
+			Serial.println(F(">>"));
+		}
+		
+		readGPS();
 	}
 }
 

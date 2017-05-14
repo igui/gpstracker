@@ -11,6 +11,8 @@
 
 #include <SoftwareSerial.h>
 
+const int MAX_MESSAGE_LENGTH = 32;
+
 class GPRS {
 public:
 	enum State {
@@ -29,8 +31,11 @@ public:
 		QUERY_DNS_CONN_STATUS_WAIT_FOR_OK,
 		SEND_DNS_PACKET_DATA_SET_LENGTH,
 		SEND_DNS_PACKET_DATA_WRITE,
-		SEND_DNS_PACKET_DATA_RECEIVED,
-		WAIT_DNS_CONN_CLOSE,
+		READ_DNS_SDATA_PREFIX,
+		READ_DNS_HEADER_STATUS,
+		SKIP_DNS_SKIP_RESPONSE_QUERY,
+		READ_DNS_FIRST_ANSWER,
+		READ_DNS_ANSWER_END,
 
 		// Packet transmition
 		CONFIGURE_REMOTE_HOST,
@@ -52,15 +57,12 @@ public:
 		QUERY_CONN_STATUS_ERROR,
 		QUERY_CONN_STATUS_INVALID_NUMBER,
 		REQUEST_NOT_CONFIGURED,
-		APN_NOT_CONFIGURED
+		APN_NOT_CONFIGURED,
+		READ_PAST_RESPONSE_END,
+		DNS_NO_ANSWER,
 	};
 
 private:
-	enum ReadMessageStatus {
-		MUST_READ,
-		IGNORE_UNTIL_LINE_END
-	};
-
 	// GPRS Serial to write commands into
 	SoftwareSerial &cellSerial;
 
@@ -82,17 +84,29 @@ private:
 	// Read message Status
 	String currentMessage;
 	String lastMessage;
-	ReadMessageStatus messageStatus;
 
+	// Used on quertConnStatus* Methods
 	int connectionStatus;
 
+	// Used when parsing binaryResponses
+	int responseRemainingBytes;
+	
+	// Used when parsing DNS responses
+	int currentPartRequestedBytes;
+	int currentPartReadBytes;
+	bool readingHighHexChar;
+	char currentHexByte[3];
+	char currentPart[MAX_MESSAGE_LENGTH];
 public:
 	GPRS(SoftwareSerial &cellSerial, const char *apn, const char *apn_user, const char *apn_password, const char *dns);
 	void beginRequest(const char *host, const char *path);
+	State getState();
+	Error getLastError();
 	void loop(char incomingChar);
 private:
 	void checkParameters();
-	void processIncomingChar(char incomingChar);
+	void processIncomingASCII(char incomingChar);
+	Error processIncomingHex(char incomingChar, bool ignore);
 
 	// Variants of simple step with different number of characters
 	void simpleStep(
@@ -111,6 +125,12 @@ private:
 	void sendDNSRequest(char incomingChar);
 	int  getDNSRequestPacketLength();
 	int  getRawRequestDataLength();
+	void readDNSSDataPrefix(char incomingChar);
+	void readDNSHeaderStatus(char incomingChar);
+	void skipDNSResponseQuery(char incomingChar);
+	void readDNSFirstAnswer(char incomingChar);
+	void readUntilEndLine(char incomingChar);
+	void configureRemoteHost(char incomingChar);
 
 	static void printCharSerial(char c);
 };

@@ -12,6 +12,8 @@ GPRS gprs(cellSerial, "antel.lte", "", "", "200.40.220.245");
 // The TinyGPS++ object
 TinyGPSPlus gps;
 
+String requestPath;
+
 void setup()
 {
 	//Initialize serial ports for communication.
@@ -21,28 +23,46 @@ void setup()
 
 	//Let's get started!
 	Serial.println("Begin");
-	gprs.beginRequest("httpbin.org", "/get?value=Alaborda");
 }
 
 
 void loop() {
-	/*gpsSerial.listen();
-	if(gpsSerial.available() > 0)
+	gpsSerial.listen();
+	while (true)
 	{
-		if (gps.encode(gpsSerial.read()) 
-			&& gps.location.isValid()
-			&& gps.date.isValid())
+		if (gpsSerial.available() > 0)
+		{
+			if (gps.encode(gpsSerial.read())
+				&& gps.location.isValid()
+				&& gps.date.isValid())
 			{
 				displayGPSInfo();
+				break;
 			}
-	}*/
+		}
+	}
 
-	//If a character comes in from the cellular module...
+	requestPath = "/get?value=" +
+		String(gps.location.lat()) +
+		"," +
+		String(gps.location.lng());
+
+	gprs.beginRequest("httpbin.org", requestPath.c_str());
+
 	cellSerial.listen();
-	if (cellSerial.available() > 0)
+	while (true)
 	{
-		char incomingChar = cellSerial.read(); //Get the character from the cellular serial port.
-		gprs.loop(incomingChar);
+		if (cellSerial.available() > 0)
+		{
+			char incomingChar = cellSerial.read(); //Get the character from the cellular serial port.
+			gprs.loop(incomingChar);
+
+			if (gprs.getState() == GPRS::DONE)
+			{
+				Serial.println(F("<<<DONE>>>"));
+				break;
+			}
+		}
 	}
 }
 

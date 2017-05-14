@@ -99,7 +99,7 @@
   </ImportGroup>
   <ProjectExtensions>
     <VisualStudio>
-      <UserProperties debug.view.DigitalPins="" />
+      <UserProperties debug.view.FreeMemory="1" debug.view.AnalogPins="1" debug.view.DigitalPins="1" />
     </VisualStudio>
   </ProjectExtensions>
 </Project>

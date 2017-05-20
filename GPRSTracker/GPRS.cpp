@@ -19,8 +19,8 @@ const char DNS_REQUEST_SUFFIX_BYTES[] = { 0x00, 0x00,
 	0x01, 0x00, 0x01
 };
 
-const unsigned long LONG_TIMEOUT = 20 * 1000;
-const unsigned long SHORT_TIMEOUT = 10 * 1000;
+const unsigned long LONG_TIMEOUT = 30 * 1000;
+const unsigned long SHORT_TIMEOUT = 20 * 1000;
 
 GPRS::GPRS(SoftwareSerial &cellSerial, const char *apn, const char *apn_user, const char *apn_password, const char *dns) :
 	cellSerial(cellSerial),
@@ -34,7 +34,8 @@ GPRS::GPRS(SoftwareSerial &cellSerial, const char *apn, const char *apn_user, co
 	responseRemainingBytes(0),
 	currentPartRequestedBytes(0),
 	currentPartReadBytes(0),
-	readingHighHexChar(true)
+	readingHighHexChar(true),
+	pdpWasSetUp(false)
 {
 	currentHexByte[0] = '\0';
 }
@@ -53,6 +54,17 @@ void GPRS::beginRequest(const char *host, const char *path)
 	currentHexByte[0] = '\0';
 	timer.removeTimeout();
 	checkParameters();
+
+	if (!pdpWasSetUp)
+	{
+		success(WAIT_FOR_AT_MODULE, LONG_TIMEOUT);
+	}
+	else
+	{
+		cellSerial.print(F("AT+CGACT=1,1\r"));
+		Serial.print(F("AT+CGACT=1,1\r"));
+		success(SET_PDP_CONTEXT_USER_PASS, LONG_TIMEOUT);
+	}
 }
 
 GPRS::State GPRS::getState()
@@ -137,10 +149,6 @@ void GPRS::checkParameters()
 	{
 		error(REQUEST_NOT_CONFIGURED);
 	}
-	else
-	{
-		success(WAIT_FOR_AT_MODULE, LONG_TIMEOUT);
-	}
 }
 
 
@@ -185,6 +193,19 @@ void GPRS::simpleStep(
 			cellSerial.print(nextCommand5);
 			Serial.print(nextCommand5);
 		}
+	}
+}
+
+void GPRS::waitForATModuleOn(char incomingChar)
+{
+	processIncomingASCII(incomingChar);
+
+	if (lastMessage == F("+SIND: 4"))
+	{
+		success(QUERY_GPRS, SHORT_TIMEOUT);
+		pdpWasSetUp = true;
+		cellSerial.print(F("AT+CGATT?\r"));
+		Serial.print(F("AT+CGATT?\r"));
 	}
 }
 
@@ -547,13 +568,7 @@ void GPRS::loop(char incomingChar) {
 	switch (state)
 	{
 	case(WAIT_FOR_AT_MODULE):
-		simpleStep(
-			incomingChar,
-			"+SIND: 4",
-			QUERY_GPRS,
-			LONG_TIMEOUT,
-			"AT+CGATT?\r"
-		);
+		waitForATModuleOn(incomingChar);	
 		break;
 	case(QUERY_GPRS):
 		simpleStep(

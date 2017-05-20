@@ -4,7 +4,7 @@
 #define _GPRS_h
 
 #if defined(ARDUINO) && ARDUINO >= 100
-	#include "arduino.h"
+	#include "Arduino.h"
 #else
 	#include "WProgram.h"
 #endif
@@ -37,6 +37,7 @@ public:
 		SKIP_DNS_SKIP_RESPONSE_QUERY,
 		READ_DNS_FIRST_ANSWER,
 		READ_DNS_ANSWER_END,
+		CLOSE_DNS_CONNECTION,
 
 		// Packet transmition
 		CONFIGURE_REMOTE_HOST,
@@ -100,6 +101,9 @@ private:
 	char currentHexByte[3];
 	char currentPart[MAX_MESSAGE_LENGTH];
 
+	// Used if ATModule was loaded
+	bool pdpWasSetUp;
+
 	// Used to calculate timeout
 	Timer timer;
 public:
@@ -126,6 +130,7 @@ private:
 		const char *nextMessage4 = NULL,
 		const char *nextMessage5 = NULL);
 	
+	void waitForATModuleOn(char incomingChar);
 	void queryConnStatusWaitForConnection(char incomingChar, State nextState);
 	void queryConnStatusWaitForOK(char incomingChar, const char *connectionId, int dataLength, State noConnState, State openConnState);
 	void sendPacketDataSendData(char incomingChar);

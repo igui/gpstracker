@@ -1,5 +1,3 @@
-#include "GPSTracker.h"
-#include "Reset.h"
 #include "Timer.h"
 #include <SoftwareSerial.h> //Include the NewSoftSerial library to send serial commands to the cellular module.
 #include <string.h> //Used for string manipulations
@@ -21,6 +19,10 @@ enum Status {
 	READ_GPS,
 	UPLOAD_GPRS
 } state;
+
+const int GPS_SIGNAL_TIMEOUT = 1000;
+
+Timer gpsSignalTimeout;
 
 void setup()
 {
@@ -59,32 +61,47 @@ void anyStateLoop()
 
 void readGPS()
 {
+	gpsSignalTimeout.setTimeout(GPS_SIGNAL_TIMEOUT);
 	state = READ_GPS;
 	gpsSerial.listen();
 }
 
 void readGPSLoop()
 {
+	if (gpsSignalTimeout.wasExpired())
+	{
+		Serial.println(F("<<GPSSignalTimeout>>"));
+		uploadGPRS();
+		return;
+	}
+
 	if (gpsSerial.available() > 0)
 	{
-		if (gps.encode(gpsSerial.read())
-			&& gps.location.isValid()
-			&& gps.date.isValid())
+		bool gotSentence = gps.encode(gpsSerial.read());
+		if (!gotSentence)
 		{
-			displayGPSInfo();
-			uploadGPRS();
+			return;
 		}
+		bool validGPSSentence = gps.location.isValid() && gps.date.isValid();
+		if (!validGPSSentence)
+		{
+			return;
+		}
+		displayGPSInfo();
+		uploadGPRS();
 	}
 }
 
 void uploadGPRS()
 {
-	requestPath = "/get?value=" +
-		String(gps.location.lat()) +
-		"," +
-		String(gps.location.lng());
+	requestPath = "/get?lat=" +
+		String(gps.location.lat(), 6) +
+		"&lng=" +
+		String(gps.location.lng(), 6) +
+		"&time=" +
+		String(gps.time.value(), DEC);
 
-	gprs.beginRequest("httpbin.org", requestPath.c_str());
+	gprs.beginRequest("whereislolo.herokuapp.com", requestPath.c_str());
 
 	cellSerial.listen();
 	state = UPLOAD_GPRS;

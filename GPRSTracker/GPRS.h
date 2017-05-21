@@ -22,7 +22,11 @@ public:
 		QUERY_GPRS,
 		SETUP_PDP_CONTEXT,
 		SET_PDP_CONTEXT_USER_PASS,
+
+		DEACTIVATE_PDP_CONTEXT,
 		ACTIVATE_PDP_CONTEXT,
+
+		
 
 		// DNS Resolution 
 		CONFIGURE_DNS_HOST_CONNECTION,
@@ -35,8 +39,10 @@ public:
 		READ_DNS_SDATA_PREFIX,
 		READ_DNS_HEADER_STATUS,
 		SKIP_DNS_SKIP_RESPONSE_QUERY,
-		READ_DNS_FIRST_ANSWER,
+		READ_ONE_DNS_ANSWER,
 		READ_DNS_ANSWER_END,
+		SKIP_DNS_ANSWER,
+		READ_DNS_ANSWER_END_ERROR,
 		CLOSE_DNS_CONNECTION,
 
 		// Packet transmition
@@ -52,6 +58,7 @@ public:
 
 		// Others
 		DONE,
+		DEAD
 	};
 
 	enum Error {
@@ -113,6 +120,7 @@ public:
 	Error getLastError();
 	void loop(char incomingChar);
 	void loopNoInput();
+	void kill();
 private:
 	void checkParameters();
 	void processIncomingASCII(char incomingChar);
@@ -139,9 +147,10 @@ private:
 	int  getRawRequestDataLength();
 	void readDNSSDataPrefix(char incomingChar);
 	void readDNSHeaderStatus(char incomingChar);
-	void skipDNSResponseQuery(char incomingChar);
+	void setUpSkipDNSAnswer();
+	void skipResponseBytes(char incomingChar, State nextState);
 	void readDNSFirstAnswer(char incomingChar);
-	void readUntilEndLine(char incomingChar);
+	void readUntilEndLine(char incomingChar, State nextStatus, bool hasError);
 	void configureRemoteHost(char incomingChar);
 	void error(Error lastError);
 	void success(State newState, unsigned long timeout);

@@ -8,7 +8,8 @@
 // GPRS constants
 const char *HTTP_USER_AGENT = "Igui's GPRS_CLIENT 0.0.1";
 const char *DNS_PORT = "53";
-const int DNS_ANSWER_LENGTH = 16;
+const int IP_DATA_LENGTH = 4;
+const int DNS_ANSWER_LENGTH = 12 + IP_DATA_LENGTH;
 
 const char DNS_REQUEST_HEADER_BYTES[] = {
 	0x00, 0x02, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
@@ -42,17 +43,9 @@ GPRS::GPRS(SoftwareSerial &cellSerial, const char *apn, const char *apn_user, co
 
 void GPRS::beginRequest(const char *host, const char *path)
 {
-	lastError = NO_ERROR;
-	ip[0] = ip[1] = ip[2] = ip[3] = 0;
+	kill();
 	this->host = host;
 	this->path = path;
-	connectionStatus = 0;
-	responseRemainingBytes = 0;
-	currentPartRequestedBytes = 0;
-	currentPartReadBytes = 0;
-	readingHighHexChar = true;
-	currentHexByte[0] = '\0';
-	timer.removeTimeout();
 	checkParameters();
 
 	if (!pdpWasSetUp)
@@ -61,9 +54,9 @@ void GPRS::beginRequest(const char *host, const char *path)
 	}
 	else
 	{
-		cellSerial.print(F("AT+CGACT=1,1\r"));
-		Serial.print(F("AT+CGACT=1,1\r"));
-		success(SET_PDP_CONTEXT_USER_PASS, LONG_TIMEOUT);
+		cellSerial.print(F("AT+CGACT=0\r"));
+		Serial.print(F("AT+CGACT=0\r"));
+		success(DEACTIVATE_PDP_CONTEXT, LONG_TIMEOUT);
 	}
 }
 
@@ -130,6 +123,7 @@ GPRS::Error GPRS::processIncomingHex(char incomingChar, bool ignore)
 			}
 		}
 
+		currentHexByte[0] = currentHexByte[1] = currentHexByte[2] = '\0';
 		readingHighHexChar = true;
 		responseRemainingBytes--;
 		currentPartReadBytes++;
@@ -287,7 +281,16 @@ void GPRS::readDNSHeaderStatus(char incomingChar)
 	}
 }
 
-void GPRS::skipDNSResponseQuery(char incomingChar)
+void GPRS::setUpSkipDNSAnswer()
+{
+	unsigned short dataLength = (currentPart[10] << 8) + currentPart[11];
+	currentPartReadBytes = 0;
+	// 4 bytes are always pre read in advance :p
+	currentPartRequestedBytes = dataLength - IP_DATA_LENGTH;
+	success(SKIP_DNS_ANSWER, 0);
+}
+
+void GPRS::skipResponseBytes(char incomingChar, GPRS::State nextState)
 {
 	if (processIncomingHex(incomingChar, true) != NO_ERROR)
 	{
@@ -297,10 +300,9 @@ void GPRS::skipDNSResponseQuery(char incomingChar)
 	if (currentPartReadBytes == currentPartRequestedBytes)
 	{
 		Serial.println();
-		Serial.println(F("Skipped Response Query"));
 		currentPartRequestedBytes = DNS_ANSWER_LENGTH;
 		currentPartReadBytes = 0;
-		success(READ_DNS_FIRST_ANSWER, SHORT_TIMEOUT);
+		success(READ_ONE_DNS_ANSWER, SHORT_TIMEOUT);
 	}
 }
 
@@ -321,7 +323,7 @@ void GPRS::readDNSFirstAnswer(char incomingChar)
 			Serial.print(F("Expected A response type: "));
 			Serial.print(currentPart[2], HEX);
 			Serial.println(currentPart[3], HEX);
-			error(DNS_NO_ANSWER);
+			setUpSkipDNSAnswer();
 			return;
 		}
 
@@ -331,6 +333,7 @@ void GPRS::readDNSFirstAnswer(char incomingChar)
 			Serial.print(currentPart[4], HEX);
 			Serial.println(currentPart[5], HEX);
 			error(DNS_NO_ANSWER);
+			state = READ_DNS_ANSWER_END_ERROR;
 			return;
 		}
 
@@ -340,6 +343,7 @@ void GPRS::readDNSFirstAnswer(char incomingChar)
 			Serial.print(currentPart[10], HEX);
 			Serial.println(currentPart[11], HEX);
 			error(DNS_NO_ANSWER);
+			state = READ_DNS_ANSWER_END_ERROR;
 			return;
 		}
 
@@ -363,7 +367,7 @@ void GPRS::readDNSFirstAnswer(char incomingChar)
 	}
 }
 
-void GPRS::readUntilEndLine(char incomingChar)
+void GPRS::readUntilEndLine(char incomingChar, GPRS::State nextStatus, bool hasError)
 {
 	if (incomingChar == '\r' || incomingChar == '\n')
 	{
@@ -371,7 +375,16 @@ void GPRS::readUntilEndLine(char incomingChar)
 		Serial.println(F("Read whole DNS packet"));
 		cellSerial.print(F("AT+SDATASTART=2,0\r"));
 		Serial.print(F("AT+SDATASTART=2,0\r"));
-		success(CONFIGURE_REMOTE_HOST, SHORT_TIMEOUT);
+
+		// In this case the error may be already set, but it is necessary to read the whole line 
+		if (hasError)
+		{
+			error(lastError);
+		}
+		else
+		{
+			success(CONFIGURE_REMOTE_HOST, SHORT_TIMEOUT);
+		}
 	}
 }
 
@@ -420,6 +433,21 @@ void GPRS::success(State newState, unsigned long timeout)
 	{
 		timer.removeTimeout();
 	}
+}
+
+void GPRS::kill()
+{
+	state = DEAD;
+	timer.removeTimeout();
+	lastError = NO_ERROR;
+	ip[0] = ip[1] = ip[2] = ip[3] = 0;
+	connectionStatus = 0;
+	responseRemainingBytes = 0;
+	currentPartRequestedBytes = 0;
+	currentPartReadBytes = 0;
+	readingHighHexChar = true;
+	currentHexByte[0] = '\0';
+	timer.removeTimeout();
 }
 
 void GPRS::queryConnStatusWaitForOK(char incomingChar, const char *connectionId, int dataLength, State onNoConn, State onYesConn)
@@ -595,7 +623,14 @@ void GPRS::loop(char incomingChar) {
 			LONG_TIMEOUT,
 			"AT+CGACT=1,1\r");
 		break;
-
+	case(DEACTIVATE_PDP_CONTEXT):
+		simpleStep(
+			incomingChar,
+			"NO CARRIER",
+			SET_PDP_CONTEXT_USER_PASS,
+			SHORT_TIMEOUT,
+			"AT+CGACT=1,1\r");
+		break;
 	case(CONFIGURE_DNS_HOST_CONNECTION):
 		simpleStep(
 			incomingChar,
@@ -653,13 +688,19 @@ void GPRS::loop(char incomingChar) {
 		readDNSHeaderStatus(incomingChar);
 		break;
 	case(SKIP_DNS_SKIP_RESPONSE_QUERY):
-		skipDNSResponseQuery(incomingChar);
+		skipResponseBytes(incomingChar, READ_ONE_DNS_ANSWER);
 		break;
-	case(READ_DNS_FIRST_ANSWER):
+	case(READ_ONE_DNS_ANSWER):
 		readDNSFirstAnswer(incomingChar);
 		break;
 	case(READ_DNS_ANSWER_END):
-		readUntilEndLine(incomingChar);
+		readUntilEndLine(incomingChar, CONFIGURE_REMOTE_HOST, false);
+		break;
+	case(READ_DNS_ANSWER_END_ERROR):
+		readUntilEndLine(incomingChar, DONE, true);
+		break;
+	case(SKIP_DNS_ANSWER):
+		skipResponseBytes(incomingChar, READ_ONE_DNS_ANSWER);
 		break;
 
 	case(CONFIGURE_REMOTE_HOST):

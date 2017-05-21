@@ -8,6 +8,9 @@
 SoftwareSerial gpsSerial(7,8);
 SoftwareSerial cellSerial(2, 3); //Create a 'fake' serial port. Pin 2 is the Rx pin, pin 3 is the Tx pin.
 
+// Triggers passage to DEAD Status
+const char DEADCHAR = '\0377';
+
 // GRPS Object
 GPRS gprs(cellSerial, "antel.lte", "", "", "200.40.220.245");
 // The TinyGPS++ object
@@ -49,13 +52,26 @@ void loop() {
 	anyStateLoop();
 }
 
+inline void dead()
+{
+}
+
 void anyStateLoop()
 {
 	if (Serial.available())
 	{
 		auto c = Serial.read();
-		cellSerial.write(c);
-		Serial.write(c);
+
+		if (c == DEADCHAR)
+		{
+			Serial.println(F("<<Kill GPRS>>"));
+			gprs.kill();
+		}
+		else
+		{
+			cellSerial.write(c);
+			Serial.write(c);
+		}
 	}
 }
 

@@ -19,6 +19,7 @@ TinyGPSPlus gps;
 String requestPath;
 // Read status
 enum Status {
+	INIT,
 	READ_GPS,
 	UPLOAD_GPRS
 } state;
@@ -33,13 +34,19 @@ void setup()
 	Serial.begin(9600);
 	cellSerial.begin(9600);
 	gpsSerial.begin(9600);
-	readGPS();
-	Serial.println("Begin");
+	
+	state = INIT;
+	cellSerial.listen();
+
+	Serial.println(F("Begin"));
 }
 
 void loop() {
 	switch (state)
 	{
+	case(INIT):
+		initGPRS();
+		break;
 	case(READ_GPS):
 		readGPSLoop();
 		break;
@@ -54,6 +61,17 @@ void loop() {
 
 inline void dead()
 {
+}
+
+inline void initGPRS()
+{
+	gprs.loop();
+
+	if (gprs.readyForCommands())
+	{
+		Serial.println(F("GPRS Module ready"));
+		readGPS();
+	}
 }
 
 void anyStateLoop()
@@ -75,14 +93,14 @@ void anyStateLoop()
 	}
 }
 
-void readGPS()
+inline void readGPS()
 {
 	gpsSignalTimeout.setTimeout(GPS_SIGNAL_TIMEOUT);
 	state = READ_GPS;
 	gpsSerial.listen();
 }
 
-void readGPSLoop()
+inline void readGPSLoop()
 {
 	if (gpsSignalTimeout.wasExpired())
 	{
@@ -108,9 +126,9 @@ void readGPSLoop()
 	}
 }
 
-void uploadGPRS()
+inline void uploadGPRS()
 {
-	requestPath = "/get?lat=" +
+	requestPath = "/upload?lat=" +
 		String(gps.location.lat(), 6) +
 		"&lng=" +
 		String(gps.location.lng(), 6) +
@@ -123,19 +141,11 @@ void uploadGPRS()
 	state = UPLOAD_GPRS;
 }
 
-void uploadGPRSLoop()
+inline void uploadGPRSLoop()
 {
-	if (cellSerial.available() > 0)
-	{
-		char incomingChar = cellSerial.read();
-		gprs.loop(incomingChar);
-	}
-	else
-	{
-		gprs.loopNoInput();
-	}
+	gprs.loop();
 
-	if (gprs.getState() == GPRS::DONE)
+	if (gprs.readyForCommands())
 	{
 		auto error = gprs.getLastError();
 		if (error == GPRS::NO_ERROR)

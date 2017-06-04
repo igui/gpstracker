@@ -14,6 +14,24 @@
 
 const int MAX_MESSAGE_LENGTH = 32;
 
+struct StringHelper {
+	enum {
+		CHAR_POINTER,
+		FLASH_POINTER,
+	} type;
+
+	union {
+		const char *memString;
+		const __FlashStringHelper *flashString;
+	} payload;
+
+	StringHelper(const char *);
+	StringHelper(const __FlashStringHelper *);
+	StringHelper operator()(const char *);
+	StringHelper operator()(const __FlashStringHelper *);
+	void printAndSerial(SoftwareSerial &serial) const;
+};
+
 class GPRS {
 public:
 	enum Error {
@@ -173,14 +191,14 @@ private:
 	// Sent to the cellSerialPort
 	void simpleStep(
 		char incomingChar,
-		const char *expectedMessage,
+		const __FlashStringHelper *expectedMessage,
 		State nextState, 
 		int nextStateTimeout,
-		const char *nextMessage = NULL,
-		const char *nextMessage2 = NULL,
-		const char *nextMessage3 = NULL,
-		const char *nextMessage4 = NULL,
-		const char *nextMessage5 = NULL);
+		const StringHelper &nextMessage = (char *)NULL,
+		const StringHelper &nextMessage2 = (char *)NULL,
+		const StringHelper &nextMessage3 = (char *)NULL,
+		const StringHelper &nextMessage4 = (char *)NULL,
+		const StringHelper &nextMessage5 = (char *)NULL);
 	
 	// Short functions that implements the behaviour
 
@@ -206,6 +224,9 @@ private:
 
 	/** Prints a the HEX representation of a Character in the output */
 	static void printCharSerial(char c);
+
+	/* Writes a PROGMEM BUFFER in the Cell and the standard Serial Port*/
+	void writeProgMemBuffer(const char *progMembuffer, size_t size);
 };
 #endif
 

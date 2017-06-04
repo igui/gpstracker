@@ -9,7 +9,7 @@ SoftwareSerial gpsSerial(7,8);
 SoftwareSerial cellSerial(2, 3); //Create a 'fake' serial port. Pin 2 is the Rx pin, pin 3 is the Tx pin.
 
 // Triggers passage to DEAD Status
-const char DEADCHAR = '\0377';
+const unsigned char DEADCHAR = 255;
 
 // GRPS Object
 GPRS gprs(cellSerial, "antel.lte", "", "", "200.40.220.245");

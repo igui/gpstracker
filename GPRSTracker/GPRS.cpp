@@ -6,17 +6,17 @@
 #include <avr/pgmspace.h>
 
 // GPRS constants
-const char *HTTP_USER_AGENT = "Igui's GPRS_CLIENT 0.0.1";
+const PROGMEM char HTTP_USER_AGENT[] = { "Igui's GPRS_CLIENT 0.0.1" };
 const char *DNS_PORT = "53";
 const int IP_DATA_LENGTH = 4;
 const int DNS_ANSWER_LENGTH = 12 + IP_DATA_LENGTH;
 
-const char DNS_REQUEST_HEADER_BYTES[] = {
+const PROGMEM char DNS_REQUEST_HEADER_BYTES[] = {
 	0x00, 0x02, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00
 };
 
-const char DNS_REQUEST_SUFFIX_BYTES[] = { 0x00, 0x00,
+const PROGMEM char DNS_REQUEST_SUFFIX_BYTES[] = { 0x00, 0x00,
 	0x01, 0x00, 0x01
 };
 
@@ -158,45 +158,26 @@ void GPRS::checkParameters()
 
 void GPRS::simpleStep(
 	char incomingChar,
-	const char *expectedCellMessage,
+	const __FlashStringHelper *expectedCellMessage,
 	State nextState,
 	int timeout,
-	const char *nextCommand1,
-	const char *nextCommand2,
-	const char *nextCommand3,
-	const char *nextCommand4,
-	const char *nextCommand5)
+	const StringHelper &nextCommand1,
+	const StringHelper &nextCommand2,
+	const StringHelper &nextCommand3,
+	const StringHelper &nextCommand4,
+	const StringHelper &nextCommand5)
 {
 	processIncomingASCII(incomingChar);
 
 	if (lastMessage == expectedCellMessage)
 	{
 		success(nextState, timeout);
-		if (nextCommand1)
-		{
-			cellSerial.print(nextCommand1);
-			Serial.print(nextCommand1);
-		}
-		if (nextCommand2)
-		{
-			cellSerial.print(nextCommand2);
-			Serial.print(nextCommand2);
-		}
-		if (nextCommand3)
-		{
-			cellSerial.print(nextCommand3);
-			Serial.print(nextCommand3);
-		}
-		if (nextCommand4)
-		{
-			cellSerial.print(nextCommand4);
-			Serial.print(nextCommand4);
-		}
-		if (nextCommand5)
-		{
-			cellSerial.print(nextCommand5);
-			Serial.print(nextCommand5);
-		}
+
+		nextCommand1.printAndSerial(cellSerial);
+		nextCommand2.printAndSerial(cellSerial);
+		nextCommand3.printAndSerial(cellSerial);
+		nextCommand4.printAndSerial(cellSerial);
+		nextCommand5.printAndSerial(cellSerial);
 	}
 }
 
@@ -236,7 +217,7 @@ int GPRS::getRawRequestDataLength()
 {
 	return 4 + strlen(path) + 11 +
 		6 + strlen(host) + 2 +
-		12 + strlen(HTTP_USER_AGENT) + 4;
+		12 + sizeof(HTTP_USER_AGENT) + 4;
 }
 
 void GPRS::readDNSSDataPrefix(char incomingChar)
@@ -541,6 +522,20 @@ void GPRS::printCharSerial(const char c)
 	Serial.print(String(int(c & 0xF), HEX));
 }
 
+void GPRS::writeProgMemBuffer(const char *progMembuffer, size_t bufsize)
+{
+	char *buffer = (char *) malloc(bufsize);
+	memccpy_P(buffer, DNS_REQUEST_HEADER_BYTES, 1, bufsize);
+
+	cellSerial.write(buffer, bufsize);
+	for (unsigned int i = 0; i < bufsize; ++i)
+	{
+		printCharSerial(buffer[i]);
+	}
+
+	free(buffer);
+}
+
 void GPRS::sendDNSRequest(char incomingChar)
 {
 	processIncomingASCII(incomingChar);
@@ -550,11 +545,7 @@ void GPRS::sendDNSRequest(char incomingChar)
 		return;
 	}
 
-	cellSerial.write(DNS_REQUEST_HEADER_BYTES, sizeof(DNS_REQUEST_HEADER_BYTES));
-	for (unsigned int i = 0; i < sizeof(DNS_REQUEST_HEADER_BYTES); ++i)
-	{
-		printCharSerial(DNS_REQUEST_HEADER_BYTES[i]);
-	}
+	writeProgMemBuffer(DNS_REQUEST_HEADER_BYTES, sizeof(DNS_REQUEST_HEADER_BYTES));
 
 	auto labelStart = host;
 	while (true)
@@ -585,14 +576,8 @@ void GPRS::sendDNSRequest(char incomingChar)
 		}
 	}
 
+	writeProgMemBuffer(DNS_REQUEST_SUFFIX_BYTES, sizeof(DNS_REQUEST_SUFFIX_BYTES));
 	
-	cellSerial.write(DNS_REQUEST_SUFFIX_BYTES, sizeof(DNS_REQUEST_SUFFIX_BYTES));
-	for (unsigned int i = 0; i < sizeof(DNS_REQUEST_SUFFIX_BYTES); ++i)
-	{
-		printCharSerial(DNS_REQUEST_SUFFIX_BYTES[i]);
-	}
-	
-
 	cellSerial.write(26); // Control+Z
 
 	Serial.print(F(" ESC\n"));
@@ -620,27 +605,27 @@ void GPRS::behaviour(char incomingChar) {
 	{
 	case(WAIT_FOR_AT_MODULE):
 		simpleStep(incomingChar,
-			"+SIND: 4",
+			F("+SIND: 4"),
 			QUERY_GPRS,
 			LONG_TIMEOUT,
-			"AT+CGATT?\r"
+			F("AT+CGATT?\r")
 		);
 		break;
 	case(QUERY_GPRS):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			SETUP_PDP_CONTEXT,
 			SHORT_TIMEOUT,
-			"AT+CGDCONT=1,\"IP\",\"", apn, "\"\r");
+			F("AT+CGDCONT=1,\"IP\",\""), apn, F("\"\r"));
 		break;
 	case(SETUP_PDP_CONTEXT):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			SET_PDP_CONTEXT_USER_PASS,
 			SHORT_TIMEOUT,
-			"AT+CGPCO=0,\"", apn_user, "\",\"", apn_password, "\", 1\r"
+			F("AT+CGPCO=0,\""), apn_user, F("\",\""), apn_password, F("\", 1\r")
 		);
 		break;
 	case(SET_PDP_CONTEXT_USER_PASS):
@@ -649,44 +634,44 @@ void GPRS::behaviour(char incomingChar) {
 	case(BEGIN_REQUEST_REACTIVATE_PDP):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			CONFIGURE_DNS_HOST_CONNECTION,
 			LONG_TIMEOUT,
-			"AT+CGACT=1,1\r");
+			F("AT+CGACT=1,1\r"));
 		break;
 	case(BEGIN_REQUEST_DEACTIVATE_PDP):
 		simpleStep(
 			incomingChar,
-			"NO CARRIER",
+			F("NO CARRIER"),
 			BEGIN_REQUEST_REACTIVATE_PDP,
 			SHORT_TIMEOUT,
-			"AT+CGACT=1,1\r");
+			F("AT+CGACT=1,1\r"));
 		break;
 	case(CONFIGURE_DNS_HOST_CONNECTION):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			START_DNS_CONNECTION,
 			LONG_TIMEOUT,
-			"AT+SDATACONF=2,\"UDP\",\"",  dns, "\",", DNS_PORT, "\r"
+			F("AT+SDATACONF=2,\"UDP\",\""),  dns, F("\","), DNS_PORT, F("\r")
 		);
 		break;
 	case(START_DNS_CONNECTION):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			QUERY_DNS_CONN_STATUS_START,
 			SHORT_TIMEOUT,
-			"AT+SDATASTART=2,1\r"
+			F("AT+SDATASTART=2,1\r")
 		);
 		break;
 	case(QUERY_DNS_CONN_STATUS_START):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			QUERY_DNS_CONN_STATUS_WAIT_FOR_CONN_STATUS,
 			SHORT_TIMEOUT,
-			"AT+SDATASTATUS=2\r"
+			F("AT+SDATASTATUS=2\r")
 		);
 		break;
 	case(QUERY_DNS_CONN_STATUS_WAIT_FOR_CONN_STATUS):
@@ -706,7 +691,7 @@ void GPRS::behaviour(char incomingChar) {
 	case(SEND_DNS_PACKET_DATA_WRITE):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			READ_DNS_SDATA_PREFIX,
 			SHORT_TIMEOUT
 		);
@@ -739,19 +724,19 @@ void GPRS::behaviour(char incomingChar) {
 	case(START_TCP_CONNECTION):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			QUERY_CONN_STATUS_START,
 			SHORT_TIMEOUT,
-			"AT+SDATASTART=1,1\r"
+			F("AT+SDATASTART=1,1\r")
 		);
 		break;
 	case(QUERY_CONN_STATUS_START):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			QUERY_CONN_STATUS_WAIT_FOR_CONN_STATUS,
 			SHORT_TIMEOUT,
-			"AT+SDATASTATUS=1\r"
+			F("AT+SDATASTATUS=1\r")
 		);
 		break;
 	case(QUERY_CONN_STATUS_WAIT_FOR_CONN_STATUS):
@@ -774,7 +759,7 @@ void GPRS::behaviour(char incomingChar) {
 	case(SEND_PACKET_DATA_WRITE):
 		simpleStep(
 			incomingChar,
-			"OK",
+			F("OK"),
 			SEND_PACKET_DATA_RECEIVED,
 			SHORT_TIMEOUT
 		);
@@ -782,10 +767,10 @@ void GPRS::behaviour(char incomingChar) {
 	case(SEND_PACKET_DATA_RECEIVED):
 		simpleStep(
 			incomingChar,
-			"+STCPD:1",
+			F("+STCPD:1"),
 			DONE,
 			SHORT_TIMEOUT,
-			"AT+SDATATREAD=1\r"
+			F("AT+SDATATREAD=1\r")
 		);
 		break;
 	default:
@@ -801,4 +786,41 @@ void GPRS::behaviourNoInput()
 	}
 }
 
+StringHelper::StringHelper(const char *s):type(CHAR_POINTER)
+{
+	payload.memString = s;
+}
+
+StringHelper::StringHelper(const __FlashStringHelper *p):type(FLASH_POINTER)
+{
+	payload.flashString = p;
+}
+
+StringHelper StringHelper::operator()(const char *s)
+{
+	return StringHelper(s);
+}
+
+StringHelper StringHelper::operator()(const __FlashStringHelper *p)
+{
+	return StringHelper(p);
+}
+
+void StringHelper::printAndSerial(SoftwareSerial & serial) const
+{
+	if ((type == CHAR_POINTER && payload.memString == NULL) ||
+		(type == FLASH_POINTER && payload.flashString == NULL))
+		return;
+
+	if (type == CHAR_POINTER)
+	{
+		serial.print(payload.memString);
+		Serial.print(payload.memString);
+	}
+	else
+	{
+		serial.print(payload.flashString);
+		Serial.print(payload.flashString);
+	}
+}
 

@@ -14,24 +14,6 @@
 
 const int MAX_MESSAGE_LENGTH = 32;
 
-struct StringHelper {
-	enum {
-		CHAR_POINTER,
-		FLASH_POINTER,
-	} type;
-
-	union {
-		const char *memString;
-		const __FlashStringHelper *flashString;
-	} payload;
-
-	StringHelper(const char *);
-	StringHelper(const __FlashStringHelper *);
-	StringHelper operator()(const char *);
-	StringHelper operator()(const __FlashStringHelper *);
-	void printAndSerial(SoftwareSerial &serial) const;
-};
-
 class GPRS {
 public:
 	enum Error {
@@ -43,7 +25,28 @@ public:
 		READ_PAST_RESPONSE_END,
 		DNS_NO_ANSWER,
 		PDP_NOT_PREPARED,
+		SMS_UNRECOGNIZED_RESPONSE,
 		TIMEOUT
+	};
+
+	typedef void(*MessageCallback)(void *data, const String &number, const String &message);
+
+	struct StringHelper {
+		enum {
+			CHAR_POINTER,
+			FLASH_POINTER,
+		} type;
+
+		union {
+			const char *memString;
+			const __FlashStringHelper *flashString;
+		} payload;
+
+		StringHelper(const char *);
+		StringHelper(const __FlashStringHelper *);
+		StringHelper operator()(const char *);
+		StringHelper operator()(const __FlashStringHelper *);
+		void printAndSerial(SoftwareSerial &serial) const;
 	};
 
 private:
@@ -86,6 +89,16 @@ private:
 		SEND_PACKET_DATA_RECEIVED,
 		WAIT_FOR_CONN_CLOSE,
 
+		// Send SMS
+		CONFIGURE_SMS_FORMAT_SEND,
+		SET_SMS_NUMBER,
+		SET_SMS_MESSAGE,
+
+		// Receive SMS
+		CONFIGURE_SMS_FORMAT_RECEIVE,
+		READ_MESSAGE_HEADER,
+		READ_MESSAGE_BODY,
+
 		// Others
 		DONE,
 
@@ -102,10 +115,19 @@ private:
 	const char *apn_password;
 	const char *dns;
 
-	// Request
+	// GET Request
 	unsigned char ip[4];
 	const char *host;
 	const char *path;
+
+	// SMS Message 
+	const char *smsNumber;
+	const char *smsMessage;
+
+	// Receive Messages
+	MessageCallback smsCallback;
+	void *smsReceiveMessagesData;
+	String currentSMSNumber;
 
 	// Operation Status
 	State state;
@@ -158,6 +180,16 @@ public:
 	 * a valid URL encoded path "/some?a=1&b=2"
 	 */
 	Error beginRequest(const char *host, const char *path);
+
+	/**
+	 *  Sends an SMS message. Number must be in international format 
+	 **/
+	Error sendSMS(const char *number, const char *message);
+
+	/**
+	 * Receives messages and 
+	 */
+	Error receiveUnreadMessages(MessageCallback callback, void *data);
 
 	/**
 	 * Read from the cell serial port and behaves accordingly 
@@ -216,6 +248,9 @@ private:
 	void readDNSFirstAnswer(char incomingChar);
 	void readUntilEndLine(char incomingChar, State nextStatus, bool hasError);
 	void configureRemoteHost(char incomingChar);
+	void setSMSMessage(char incomingChar);
+	void readMessageHeader(char incomingChar);
+	void readMessageBody(char incomingChar);
 
 	/** Resets timeouts and set the last error. Almost always that means something bad happened */
 	void error(Error lastError);

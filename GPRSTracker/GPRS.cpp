@@ -48,7 +48,7 @@ bool GPRS::readyForCommands()
 
 GPRS::Error GPRS::beginRequest(const char *host, const char *path)
 {
-	if (!pdpWasSetUp)
+	if (!readyForCommands())
 	{
 		return PDP_NOT_PREPARED;
 	}
@@ -73,6 +73,38 @@ GPRS::Error GPRS::beginRequest(const char *host, const char *path)
 		success(BEGIN_REQUEST_DEACTIVATE_PDP, LONG_TIMEOUT);
 	}
 	return lastError;
+}
+
+GPRS::Error GPRS::sendSMS(const char *number, const char *message)
+{
+	if (!readyForCommands())
+	{
+		return PDP_NOT_PREPARED;
+	}
+
+	kill();
+	smsNumber = number;
+	smsMessage = message;
+	cellSerial.print(F("AT+CMGF=1\r"));
+	Serial.print(F("AT+CMGF=1\r"));
+	success(CONFIGURE_SMS_FORMAT_SEND, SHORT_TIMEOUT);
+	return GPRS::NO_ERROR;
+}
+
+GPRS::Error GPRS::receiveUnreadMessages(MessageCallback callback, void * data)
+{
+	if (!readyForCommands())
+	{
+		return PDP_NOT_PREPARED;
+	}
+
+	kill();
+	smsCallback = callback;
+	smsReceiveMessagesData = data;
+	cellSerial.print(F("AT+CMGF=1\r"));
+	Serial.print(F("AT+CMGF=1\r"));
+	success(CONFIGURE_SMS_FORMAT_RECEIVE, SHORT_TIMEOUT);
+	return GPRS::NO_ERROR;
 }
 
 GPRS::Error GPRS::getLastError()
@@ -400,6 +432,78 @@ void GPRS::configureRemoteHost(char incomingChar)
 		}
 		cellSerial.print(F("\",80\r"));
 		Serial.print(F("\",80\r"));
+	}
+}
+
+void GPRS::setSMSMessage(char incomingChar)
+{
+	processIncomingASCII(incomingChar);
+
+	if (currentMessage != F(">"))
+	{
+		return;
+	}
+
+	Serial.print(F("<<Sending message>>\n"));
+
+	cellSerial.print(smsMessage);
+	cellSerial.write(26); // Control+Z
+
+	success(SET_SMS_MESSAGE, SHORT_TIMEOUT);
+}
+
+void GPRS::readMessageHeader(char incomingChar)
+{
+	processIncomingASCII(incomingChar);
+	if (lastMessage == F("OK"))
+	{
+		success(DONE, 0);
+		return;
+	}
+	else if(!lastMessage.startsWith("+CMGL:"))
+	{
+		error(SMS_UNRECOGNIZED_RESPONSE);
+		return;
+	}
+
+	int startIndex = lastMessage.indexOf('"', 0);
+	if (startIndex < 0)
+	{
+		error(SMS_UNRECOGNIZED_RESPONSE);
+		return;
+	}
+	startIndex = lastMessage.indexOf('"', startIndex + 1);
+	if (startIndex < 0)
+	{
+		error(SMS_UNRECOGNIZED_RESPONSE);
+		return;
+	}
+	startIndex = lastMessage.indexOf('"', startIndex + 1);
+	if (startIndex < 0)
+	{
+		error(SMS_UNRECOGNIZED_RESPONSE);
+		return;
+	}
+	int endIndex = lastMessage.indexOf('"', startIndex + 1);
+	if (endIndex < 0)
+	{
+		error(SMS_UNRECOGNIZED_RESPONSE);
+		return;
+	}
+
+	currentSMSNumber = lastMessage.substring(startIndex + 1, endIndex - 1);
+
+	success(READ_MESSAGE_BODY, SHORT_TIMEOUT);
+}
+
+void GPRS::readMessageBody(char incomingChar)
+{
+	processIncomingASCII(incomingChar);
+
+	if (lastMessage != "")
+	{
+		smsCallback(smsReceiveMessagesData, currentSMSNumber, lastMessage);
+		success(READ_MESSAGE_HEADER, SHORT_TIMEOUT);
 	}
 }
 
@@ -773,6 +877,35 @@ void GPRS::behaviour(char incomingChar) {
 			F("AT+SDATATREAD=1\r")
 		);
 		break;
+	case(CONFIGURE_SMS_FORMAT_SEND):
+		simpleStep(
+			incomingChar,
+			F("OK"),
+			SET_SMS_NUMBER,
+			SHORT_TIMEOUT,
+			F("AT+CMGS=\""), smsNumber, F("\"\r")
+		);
+		break;
+	case(SET_SMS_NUMBER):
+		setSMSMessage(incomingChar);
+		break;
+	case(SET_SMS_MESSAGE):
+		simpleStep(incomingChar, F("OK"), DONE, 0);
+	case(CONFIGURE_SMS_FORMAT_RECEIVE):
+		simpleStep(
+			incomingChar,
+			F("OK"),
+			READ_MESSAGE_HEADER,
+			SHORT_TIMEOUT,
+			F("AT+CMGL=\"REC UNREAD\"\r")
+		);
+		break;
+	case READ_MESSAGE_HEADER:
+		readMessageHeader(incomingChar);
+		break;
+	case READ_MESSAGE_BODY:
+		readMessageBody(incomingChar);
+		break;
 	default:
 		break;
 	}
@@ -786,27 +919,27 @@ void GPRS::behaviourNoInput()
 	}
 }
 
-StringHelper::StringHelper(const char *s):type(CHAR_POINTER)
+GPRS::StringHelper::StringHelper(const char *s):type(CHAR_POINTER)
 {
 	payload.memString = s;
 }
 
-StringHelper::StringHelper(const __FlashStringHelper *p):type(FLASH_POINTER)
+GPRS::StringHelper::StringHelper(const __FlashStringHelper *p):type(FLASH_POINTER)
 {
 	payload.flashString = p;
 }
 
-StringHelper StringHelper::operator()(const char *s)
+GPRS::StringHelper GPRS::StringHelper::operator()(const char *s)
 {
-	return StringHelper(s);
+	return GPRS::StringHelper(s);
 }
 
-StringHelper StringHelper::operator()(const __FlashStringHelper *p)
+GPRS::StringHelper GPRS::StringHelper::operator()(const __FlashStringHelper *p)
 {
-	return StringHelper(p);
+	return GPRS::StringHelper(p);
 }
 
-void StringHelper::printAndSerial(SoftwareSerial & serial) const
+void GPRS::StringHelper::printAndSerial(SoftwareSerial & serial) const
 {
 	if ((type == CHAR_POINTER && payload.memString == NULL) ||
 		(type == FLASH_POINTER && payload.flashString == NULL))

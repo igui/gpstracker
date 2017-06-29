@@ -20,11 +20,17 @@ String requestPath;
 // Read status
 enum Status {
 	INIT,
+	READ_UNREAD_MESSAGES,
+	SEND_SMS_DATA_QUERY,
+	READ_SMS_DATA_QUERY_RESPONSE,
+	SEND_SMS_RESPONSES,
 	READ_GPS,
 	UPLOAD_GPRS
 } state;
 
 const int GPS_SIGNAL_TIMEOUT = 1000;
+
+const char *smsNumber = "+59899389599";
 
 Timer gpsSignalTimeout;
 
@@ -47,6 +53,9 @@ void loop() {
 	case(INIT):
 		initGPRS();
 		break;
+	case(READ_UNREAD_MESSAGES):
+		readUnreadMessagesLoop();
+		break;
 	case(READ_GPS):
 		readGPSLoop();
 		break;
@@ -59,19 +68,44 @@ void loop() {
 	anyStateLoop();
 }
 
-inline void dead()
+void dead()
 {
 }
 
-inline void initGPRS()
+void initGPRS()
 {
 	gprs.loop();
 
 	if (gprs.readyForCommands())
 	{
 		Serial.println(F("GPRS Module ready"));
+		readUnreadMessages();
+	}
+}
+
+void unreadMessagesCallback(void *data, const String &number, const String &message)
+{
+	Serial.println(F("<<unreadMessagesCallback>>"));
+	Serial.println(number);
+	Serial.println(message);
+}
+
+void readUnreadMessages()
+{
+	gprs.receiveUnreadMessages(unreadMessagesCallback, NULL);
+	state = READ_UNREAD_MESSAGES;
+
+	if (gprs.readyForCommands())
+	{
+		Serial.println(F("Finish reading messages"));
 		readGPS();
 	}
+
+}
+
+void readUnreadMessagesLoop()
+{
+	gprs.loop();
 }
 
 void anyStateLoop()

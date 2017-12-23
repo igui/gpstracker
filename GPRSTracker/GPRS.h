@@ -49,6 +49,7 @@ public:
 		void printAndSerial(SoftwareSerial &serial) const;
 	};
 
+
 private:
 	enum State {
 		// Initialization
@@ -135,7 +136,6 @@ private:
 	
 	// Read message Status
 	String currentMessage;
-	String lastMessage;
 
 	// Used on quertConnStatus* Methods
 	int connectionStatus;
@@ -213,7 +213,7 @@ private:
 	void checkParameters();
 
 	// Process one character and update the incoming char buffer
-	void processIncomingASCII(char incomingChar);
+	String processIncomingASCII(char incomingChar);
 
 	// Process one quad-bit represented as a Hex character and
 	// Store in currentPart (only for DNS answer resolution)

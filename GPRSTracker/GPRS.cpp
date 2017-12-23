@@ -112,7 +112,7 @@ GPRS::Error GPRS::getLastError()
 	return lastError;
 }
 
-void GPRS::processIncomingASCII(char incoming_char)
+String GPRS::processIncomingASCII(char incoming_char)
 {
 	currentMessage += incoming_char;
 	int current_message_length = currentMessage.length();
@@ -123,11 +123,11 @@ void GPRS::processIncomingASCII(char incoming_char)
 	{
 		String result = currentMessage.substring(0, current_message_length - 2);
 		currentMessage = "";
-		lastMessage = result;
+		return result;
 	}
 	else
 	{
-		lastMessage = "";
+		return "";
 	}
 }
 
@@ -139,7 +139,6 @@ GPRS::Error GPRS::processIncomingHex(char incomingChar, bool ignore)
 		return lastError;
 	}
 
-	lastMessage = "";
 	if (readingHighHexChar)
 	{
 		if (!ignore)
@@ -199,7 +198,7 @@ void GPRS::simpleStep(
 	const StringHelper &nextCommand4,
 	const StringHelper &nextCommand5)
 {
-	processIncomingASCII(incomingChar);
+	auto lastMessage = processIncomingASCII(incomingChar);
 
 	if (lastMessage == expectedCellMessage)
 	{
@@ -215,7 +214,7 @@ void GPRS::simpleStep(
 
 void GPRS::waitForSetUp(char incomingChar)
 {
-	processIncomingASCII(incomingChar);
+	auto lastMessage = processIncomingASCII(incomingChar);
 
 	if (lastMessage == F("OK"))
 	{
@@ -226,7 +225,7 @@ void GPRS::waitForSetUp(char incomingChar)
 
 void GPRS::queryConnStatusWaitForConnection(char incomingChar, GPRS::State nextState)
 {
-	processIncomingASCII(incomingChar);
+	auto lastMessage = processIncomingASCII(incomingChar);
 
 	if (!lastMessage.startsWith("+SOCKSTATUS:"))
 	{
@@ -254,7 +253,7 @@ int GPRS::getRawRequestDataLength()
 
 void GPRS::readDNSSDataPrefix(char incomingChar)
 {
-	processIncomingASCII(incomingChar);
+	auto lastMessage = processIncomingASCII(incomingChar);
 	if (currentMessage.startsWith("+SDATA:2,") &&
 		currentMessage.length() > 10 &&
 		currentMessage.endsWith(",")
@@ -411,7 +410,7 @@ void GPRS::readUntilEndLine(char incomingChar, GPRS::State nextStatus, bool hasE
 
 void GPRS::configureRemoteHost(char incomingChar)
 {
-	processIncomingASCII(incomingChar);
+	auto lastMessage = processIncomingASCII(incomingChar);
 
 	if (lastMessage == "OK")
 	{
@@ -454,7 +453,11 @@ void GPRS::setSMSMessage(char incomingChar)
 
 void GPRS::readMessageHeader(char incomingChar)
 {
-	processIncomingASCII(incomingChar);
+	auto lastMessage = processIncomingASCII(incomingChar);
+	if (lastMessage == "")
+	{
+		return;
+	}
 	if (lastMessage == F("OK"))
 	{
 		success(DONE, 0);
@@ -462,43 +465,44 @@ void GPRS::readMessageHeader(char incomingChar)
 	}
 	else if(!lastMessage.startsWith("+CMGL:"))
 	{
+		// It can be an status message
+		return;
+	}
+
+	int typeStartIndex = lastMessage.indexOf('"', 0);
+	if (typeStartIndex < 0)
+	{
+		error(SMS_UNRECOGNIZED_RESPONSE);
+		return;
+	}
+	int typeEndIndex = lastMessage.indexOf('"', typeStartIndex + 1);
+	if (typeEndIndex < 0)
+	{
+		error(SMS_UNRECOGNIZED_RESPONSE);
+		return;
+	}
+	
+	int numberStartIndex = lastMessage.indexOf('"', typeEndIndex + 1);
+	if (numberStartIndex < 0)
+	{
+		error(SMS_UNRECOGNIZED_RESPONSE);
+		return;
+	}
+	int numberEndIndex = lastMessage.indexOf('"', numberStartIndex + 1);
+	if (numberEndIndex < 0)
+	{
 		error(SMS_UNRECOGNIZED_RESPONSE);
 		return;
 	}
 
-	int startIndex = lastMessage.indexOf('"', 0);
-	if (startIndex < 0)
-	{
-		error(SMS_UNRECOGNIZED_RESPONSE);
-		return;
-	}
-	startIndex = lastMessage.indexOf('"', startIndex + 1);
-	if (startIndex < 0)
-	{
-		error(SMS_UNRECOGNIZED_RESPONSE);
-		return;
-	}
-	startIndex = lastMessage.indexOf('"', startIndex + 1);
-	if (startIndex < 0)
-	{
-		error(SMS_UNRECOGNIZED_RESPONSE);
-		return;
-	}
-	int endIndex = lastMessage.indexOf('"', startIndex + 1);
-	if (endIndex < 0)
-	{
-		error(SMS_UNRECOGNIZED_RESPONSE);
-		return;
-	}
-
-	currentSMSNumber = lastMessage.substring(startIndex + 1, endIndex - 1);
+	currentSMSNumber = lastMessage.substring(numberStartIndex + 1, numberEndIndex);
 
 	success(READ_MESSAGE_BODY, SHORT_TIMEOUT);
 }
 
 void GPRS::readMessageBody(char incomingChar)
 {
-	processIncomingASCII(incomingChar);
+	auto lastMessage = processIncomingASCII(incomingChar);
 
 	if (lastMessage != "")
 	{
@@ -509,6 +513,8 @@ void GPRS::readMessageBody(char incomingChar)
 
 void GPRS::error(Error lastError)
 {
+	Serial.print(F("<<<ERROR>>> "));
+	Serial.println(lastError);
 	state = DONE;
 	this->lastError = lastError;
 	timer.removeTimeout();
@@ -558,7 +564,7 @@ void GPRS::kill()
 
 void GPRS::queryConnStatusWaitForOK(char incomingChar, const char *connectionId, int dataLength, State onNoConn, State onYesConn)
 {
-	processIncomingASCII(incomingChar);
+	auto lastMessage = processIncomingASCII(incomingChar);
 
 	const int CONNECTION_STATUS_LOOP_INTERVAL = 1000;
 

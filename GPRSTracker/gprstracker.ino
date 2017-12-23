@@ -6,7 +6,7 @@
 
 // The serial connection to the GPS device
 SoftwareSerial gpsSerial(7,8);
-SoftwareSerial cellSerial(2, 3); //Create a 'fake' serial port. Pin 2 is the Rx pin, pin 3 is the Tx pin.
+SoftwareSerial cellSerial(2, 3); 
 
 // Triggers passage to DEAD Status
 const unsigned char DEADCHAR = 255;
@@ -20,6 +20,7 @@ String requestPath;
 // Read status
 enum Status {
 	INIT,
+	REMAINING_DATA_REQ_SEND,
 	READ_UNREAD_MESSAGES,
 	SEND_SMS_DATA_QUERY,
 	READ_SMS_DATA_QUERY_RESPONSE,
@@ -28,7 +29,7 @@ enum Status {
 	UPLOAD_GPRS
 } state;
 
-const int GPS_SIGNAL_TIMEOUT = 1000;
+const int GPS_SIGNAL_TIMEOUT = 5000;
 
 const char *smsNumber = "+59899389599";
 
@@ -52,6 +53,9 @@ void loop() {
 	{
 	case(INIT):
 		initGPRS();
+		break;
+	case(REMAINING_DATA_REQ_SEND):
+		remainingDataReqSendLoop();
 		break;
 	case(READ_UNREAD_MESSAGES):
 		readUnreadMessagesLoop();
@@ -79,6 +83,23 @@ void initGPRS()
 	if (gprs.readyForCommands())
 	{
 		Serial.println(F("GPRS Module ready"));
+		sendRemainingDataMessage();
+	}
+}
+
+void sendRemainingDataMessage()
+{
+	gprs.sendSMS("226", "saldo");
+	state = REMAINING_DATA_REQ_SEND;
+}
+
+void remainingDataReqSendLoop()
+{
+	gprs.loop();
+
+	if (gprs.readyForCommands())
+	{
+		Serial.println(F("Finish sending message"));
 		readUnreadMessages();
 	}
 }
@@ -94,18 +115,17 @@ void readUnreadMessages()
 {
 	gprs.receiveUnreadMessages(unreadMessagesCallback, NULL);
 	state = READ_UNREAD_MESSAGES;
+}
+
+void readUnreadMessagesLoop()
+{
+	gprs.loop();
 
 	if (gprs.readyForCommands())
 	{
 		Serial.println(F("Finish reading messages"));
 		readGPS();
 	}
-
-}
-
-void readUnreadMessagesLoop()
-{
-	gprs.loop();
 }
 
 void anyStateLoop()
